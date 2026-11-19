@@ -40,3 +40,4 @@ core/*.bak_*
 bin/
 *.BIN
 *.orig
+.DS_Store
