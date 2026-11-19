@@ -23,6 +23,8 @@ This fork ports chdk-film to the **Canon PowerShot SX240 HS** (`PLATFORM=sx240hs
 - **Build (macOS, Apple Silicon):** xPack `arm-none-eabi-gcc` 10.3.1, then `mkdir -p bin && make PLATFORM=sx240hs PLATFORMSUB=101a fir`. Ready-made files are on the Releases page.
 - **Experimental:** use at your own risk. The stock parameter table below was updated from the values in `core/film.c`.
 
+All the films have been fine-tuned and slightly modified.
+
 ## Film stocks
 
 | Stock | Look |
@@ -38,8 +40,6 @@ This fork ports chdk-film to the **Canon PowerShot SX240 HS** (`PLATFORM=sx240hs
 | HP5 Plus | softer black and white, coarse grain |
 | T-Max 100 | smooth, fine-grained black and white |
 | Expired Lomo | faded, cross-processed tints, heavy vignette and grain |
-
-Extension Added
 | Kodachrome 64 | Warm, rich reds, strong contrast |
 | Fuji Pro 400H | Soft pastel, airy cyan-green tint |
 | Polaroid | Faded instant film, blue shadows |
