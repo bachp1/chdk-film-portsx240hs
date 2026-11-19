@@ -8,6 +8,19 @@ Pick a film stock and every JPEG the camera takes is developed through it: tone 
 
 Like stock CHDK it runs from the SD card only. Nothing is written to the camera, so taking the card out (or unlocking it) gives you a stock camera back.
 
+<!-- SX240HS-PORT -->
+## Canon SX240 HS port (firmware GM1.01A)
+
+This fork ports chdk-film to the **Canon PowerShot SX240 HS** (`PLATFORM=sx240hs PLATFORMSUB=101a`, DIGIC 5, 12-bit RAW 4176x3060). Port and extra films by Bastian ("PortHack by Bastian").
+
+- **Extra films:** Kodachrome 64, Fuji Pro 400H, Polaroid, plus three inspired by Fujifilm X-M5 simulations: Portra 800 v3 (Classic Chrome), Last Summer Roll (Classic Negative) and Classic Neg DR400. The colour films have extra dynamic range and a soft retro look.
+- **Processing indicator:** the power LED blinks while a photo is processed (about 8 s per photo).
+- **Shot log:** every shot is logged to `CHDK/FILM.LOG` with the film used.
+- **Live preview:** not available; software processing of the viewfinder is too slow, so only Canon's own B/W shows live.
+- **SD card:** FAT32, bootable, write-protect switch in **LOCK**. Do not use the "Firm Update" entry or any old `PS.FI2`.
+- **Build (macOS, Apple Silicon):** xPack `arm-none-eabi-gcc` 10.3.1, then `mkdir -p bin && make PLATFORM=sx240hs PLATFORMSUB=101a fir`. Ready-made files are on the Releases page.
+- **Experimental:** use at your own risk. The stock parameter table below was updated from the values in `core/film.c`.
+
 ## Film stocks
 
 | Stock | Look |
@@ -23,6 +36,14 @@ Like stock CHDK it runs from the SD card only. Nothing is written to the camera,
 | HP5 Plus | softer black and white, coarse grain |
 | T-Max 100 | smooth, fine-grained black and white |
 | Expired Lomo | faded, cross-processed tints, heavy vignette and grain |
+
+Extension Added
+| Kodachrome 64 | Warm, rich reds, strong contrast |
+| Fuji Pro 400H | Soft pastel, airy cyan-green tint |
+| Polaroid | Faded instant film, blue shadows |
+| Portra 800 v3 | Warm chrome, soft highlights, big grain |
+| Last Summer Roll | Warm summer negative, green-tinged shadows |
+| Classic Neg DR400 | Rich colour negative, green shadows |
 
 ## On the camera
 
@@ -178,17 +199,23 @@ It is set when chdk-film starts and whenever you change stock, so a manual chang
 
 | Stock | Saturation | Contrast | Lift | White | Shadow tint (R, G, B) | Highlight tint (R, G, B) | Grain | Vignette |
 |---|---|---|---|---|---|---|---|---|
-| Portra 400 | 0.90 | 0.08 | 0.030 | 0.975 | +.010 +.004 −.004 | +.016 +.006 −.018 | 3 fine | – |
-| Ektar 100 | 1.15 | 0.18 | 0 | 1 | −.004 0 +.010 | +.010 +.004 −.008 | 1 fine | – |
-| Gold 200 | 1.05 | 0.12 | 0.020 | 0.985 | +.012 +.006 −.006 | +.026 +.014 −.030 | 3 fine | – |
-| Superia 400 | 1.00 | 0.12 | 0.025 | 0.980 | −.010 +.012 +.006 | 0 +.004 +.006 | 4 fine | – |
-| Velvia 50 | 1.30 | 0.28 | 0 | 1 | −.004 −.006 +.012 | +.006 0 −.006 | 1 fine | 0.10 |
-| Ektachrome E100 | 1.12 | 0.20 | 0 | 1 | −.006 0 +.016 | −.004 +.002 +.012 | 1 fine | – |
-| Cinestill 800T | 1.00 | 0.14 | 0.020 | 0.985 | −.012 +.010 +.030 | +.012 0 −.004 | 6 medium | – |
-| Tri-X 400 | 0 | 0.25 | 0.010 | 1 | – | – | 6 medium | – |
-| HP5 Plus | 0 | 0.12 | 0.030 | 0.980 | – | – | 7 coarse | – |
-| T-Max 100 | 0 | 0.15 | 0 | 1 | – | – | 2 fine | – |
-| Expired Lomo | 1.20 | 0.25 | 0.060 | 0.950 | −.016 +.010 +.020 | +.024 +.016 −.024 | 7 coarse | 0.45 |
+| Portra 400 | 0.90 | 0.08 | 0.042 | 0.963 | +.010 +.004 −.004 | +.016 +.006 −.018 | 3 fine | – |
+| Ektar 100 | 1.15 | 0.18 | 0.012 | 0.988 | −.004 0 +.010 | +.010 +.004 −.008 | 1 fine | – |
+| Gold 200 | 1.05 | 0.12 | 0.032 | 0.973 | +.012 +.006 −.006 | +.026 +.014 −.030 | 3 fine | – |
+| Superia 400 | 1.00 | 0.12 | 0.037 | 0.968 | −.010 +.012 +.006 | 0 +.004 +.006 | 4 fine | – |
+| Velvia 50 | 1.30 | 0.28 | 0.012 | 0.988 | −.004 −.006 +.012 | +.006 0 −.006 | 1 fine | 0.10 |
+| Ektachrome E100 | 1.12 | 0.20 | 0.012 | 0.988 | −.006 0 +.016 | −.004 +.002 +.012 | 1 fine | – |
+| Cinestill 800T | 1.00 | 0.14 | 0.032 | 0.973 | −.012 +.010 +.030 | +.012 0 −.004 | 6 medium | – |
+| Tri-X 400 | 0 | 0.25 | 0.010 | 1.000 |  |  | 6 medium | – |
+| HP5 Plus | 0 | 0.12 | 0.030 | 0.980 |  |  | 7 coarse | – |
+| T-Max 100 | 0 | 0.15 | 0 | 1.000 |  |  | 2 fine | – |
+| Expired Lomo | 1.20 | 0.25 | 0.060 | 0.938 | −.016 +.010 +.020 | +.024 +.016 −.024 | 7 coarse | 0.45 |
+| Kodachrome 64 | 1.15 | 0.34 | 0.017 | 0.978 | −.012 +.006 +.026 | +.044 +.014 −.044 | 2 fine | 0.06 |
+| Fuji Pro 400H | 0.92 | 0.26 | 0.047 | 0.958 | −.016 +.018 +.024 | +.022 +.020 −.014 | 3 fine | – |
+| Polaroid | 0.95 | 0.24 | 0.060 | 0.928 | +.008 +.010 +.022 | +.020 +.012 −.016 | 4 medium | 0.25 |
+| Portra 800 v3 | 0.95 | 0.16 | 0.015 | 0.965 | +.006 +.002 +.010 | +.024 +.010 −.026 | 6 coarse | – |
+| Last Summer Roll | 1.10 | 0.20 | 0.030 | 0.975 | −.004 +.010 +.004 | +.028 +.014 −.024 | 4 fine | – |
+| Classic Neg DR400 | 1.22 | 0.18 | 0.020 | 0.970 | −.010 +.016 +.004 | +.006 +.008 −.004 | 3 fine | – |
 
 Tints are in perceptual units: 0.010 is 1% of the tonal range. To add a stock, add a row to `film_stocks[]` in `core/film.c`, then check it with the host preview before building.
 
