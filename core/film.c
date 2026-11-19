@@ -1,3 +1,4 @@
+/* DR+ aplicado */
 #include "platform.h"
 #include "camera_info.h"
 #include "conf.h"
@@ -10,6 +11,17 @@
 #include "sd_card.h"
 #include "debug_led.h"
 #include "film.h"
+#ifndef FILM_HOST_PREVIEW
+#include "gui_osd.h"
+#endif
+
+// Speed matters more than size here: the raw loop runs over millions of pixels
+#pragma GCC optimize("O3")
+#pragma GCC target("arm")
+
+#ifndef FILM_PROFILE
+#define FILM_PROFILE 0      // 1 = TEST BUILD: only unpack and repack, no effect
+#endif
 
 /*
     Film simulation
@@ -35,21 +47,29 @@
 #define MC_BW       3
 #define MC_POSITIVE 5
 
+static void film_cc_suspend(void);
+
 const film_stock_t film_stocks[] =
 {
     //  name               tag        description                                 my_colors    sat       contrast  lift      white      shadow tint R,G,B                highlight tint R,G,B              grain size vignette
     { "Off",              "",        "No film look, camera colour only",         -1,          Q(1.00),  Q(0.00),  Q(0.000), Q(1.000), { 0, 0, 0 },                    { 0, 0, 0 },                     0, 0, 0 },
-    { "Portra 400",       "PORTRA",  "Soft contrast, warm skin, lifted blacks",  MC_OFF,      Q(0.90),  Q(0.08),  Q(0.030), Q(0.975), { Q(0.010),  Q(0.004), Q(-0.004) }, { Q(0.016),  Q(0.006), Q(-0.018) }, 3, 0, 0 },
-    { "Ektar 100",        "EKTAR",   "Punchy colour, fine grain",                MC_VIVID,    Q(1.15),  Q(0.18),  Q(0.000), Q(1.000), { Q(-0.004), Q(0.000), Q(0.010) },  { Q(0.010),  Q(0.004), Q(-0.008) }, 1, 0, 0 },
-    { "Gold 200",         "GOLD",    "Warm golden highlights",                   MC_OFF,      Q(1.05),  Q(0.12),  Q(0.020), Q(0.985), { Q(0.012),  Q(0.006), Q(-0.006) }, { Q(0.026),  Q(0.014), Q(-0.030) }, 3, 0, 0 },
-    { "Superia 400",      "SUPERIA", "Green shadows, cool everyday colour",      MC_OFF,      Q(1.00),  Q(0.12),  Q(0.025), Q(0.980), { Q(-0.010), Q(0.012), Q(0.006) },  { Q(0.000),  Q(0.004), Q(0.006) },  4, 0, 0 },
-    { "Velvia 50",        "VELVIA",  "Vivid slide film, deep contrast",          MC_POSITIVE, Q(1.30),  Q(0.28),  Q(0.000), Q(1.000), { Q(-0.004), Q(-0.006), Q(0.012) }, { Q(0.006),  Q(0.000), Q(-0.006) }, 1, 0, Q(0.10) },
-    { "Ektachrome E100",  "E100",    "Clean slide film, cool blues",             MC_OFF,      Q(1.12),  Q(0.20),  Q(0.000), Q(1.000), { Q(-0.006), Q(0.000), Q(0.016) },  { Q(-0.004), Q(0.002), Q(0.012) },  1, 0, 0 },
-    { "Cinestill 800T",   "800T",    "Tungsten night film, teal shadows",        MC_OFF,      Q(1.00),  Q(0.14),  Q(0.020), Q(0.985), { Q(-0.012), Q(0.010), Q(0.030) },  { Q(0.012),  Q(0.000), Q(-0.004) }, 6, 1, 0 },
+    { "Portra 400", "PORTRA", "Soft contrast, warm skin, lifted blacks", MC_OFF, Q(0.900), Q(0.080), Q(0.042), Q(0.963), { Q(0.010), Q(0.004), Q(-0.004) }, { Q(0.016), Q(0.006), Q(-0.018) }, 3, 0, 0 },
+    { "Ektar 100", "EKTAR", "Punchy colour, fine grain", MC_VIVID, Q(1.150), Q(0.180), Q(0.012), Q(0.988), { Q(-0.004), Q(0.000), Q(0.010) }, { Q(0.010), Q(0.004), Q(-0.008) }, 1, 0, 0 },
+    { "Gold 200", "GOLD", "Warm golden highlights", MC_OFF, Q(1.050), Q(0.120), Q(0.032), Q(0.973), { Q(0.012), Q(0.006), Q(-0.006) }, { Q(0.026), Q(0.014), Q(-0.030) }, 3, 0, 0 },
+    { "Superia 400", "SUPERIA", "Green shadows, cool everyday colour", MC_OFF, Q(1.000), Q(0.120), Q(0.037), Q(0.968), { Q(-0.010), Q(0.012), Q(0.006) }, { Q(0.000), Q(0.004), Q(0.006) }, 4, 0, 0 },
+    { "Velvia 50", "VELVIA", "Vivid slide film, deep contrast", MC_POSITIVE, Q(1.300), Q(0.280), Q(0.012), Q(0.988), { Q(-0.004), Q(-0.006), Q(0.012) }, { Q(0.006), Q(0.000), Q(-0.006) }, 1, 0, Q(0.10) },
+    { "Ektachrome E100", "E100", "Clean slide film, cool blues", MC_OFF, Q(1.120), Q(0.200), Q(0.012), Q(0.988), { Q(-0.006), Q(0.000), Q(0.016) }, { Q(-0.004), Q(0.002), Q(0.012) }, 1, 0, 0 },
+    { "Cinestill 800T", "800T", "Tungsten night film, teal shadows", MC_OFF, Q(1.000), Q(0.140), Q(0.032), Q(0.973), { Q(-0.012), Q(0.010), Q(0.030) }, { Q(0.012), Q(0.000), Q(-0.004) }, 6, 1, 0 },
     { "Tri-X 400",        "TRI-X",   "Contrasty black & white, classic grain",   MC_BW,       Q(0.00),  Q(0.25),  Q(0.010), Q(1.000), { 0, 0, 0 },                    { 0, 0, 0 },                     6, 1, 0 },
     { "HP5 Plus",         "HP5",     "Soft black & white, coarse grain",         MC_BW,       Q(0.00),  Q(0.12),  Q(0.030), Q(0.980), { 0, 0, 0 },                    { 0, 0, 0 },                     7, 2, 0 },
     { "T-Max 100",        "T-MAX",   "Smooth, fine black & white",               MC_BW,       Q(0.00),  Q(0.15),  Q(0.000), Q(1.000), { 0, 0, 0 },                    { 0, 0, 0 },                     2, 0, 0 },
-    { "Expired Lomo",     "LOMO",    "Faded, cross-processed, dark corners",     MC_OFF,      Q(1.20),  Q(0.25),  Q(0.060), Q(0.950), { Q(-0.016), Q(0.010), Q(0.020) },  { Q(0.024),  Q(0.016), Q(-0.024) }, 7, 2, Q(0.45) },
+    { "Expired Lomo", "LOMO", "Faded, cross-processed, dark corners", MC_OFF, Q(1.200), Q(0.250), Q(0.060), Q(0.938), { Q(-0.016), Q(0.010), Q(0.020) }, { Q(0.024), Q(0.016), Q(-0.024) }, 7, 2, Q(0.45) },
+    { "Kodachrome 64", "K64", "Warm, rich reds, strong contrast", MC_OFF, Q(1.150), Q(0.340), Q(0.017), Q(0.978), { Q(-0.012), Q(0.006), Q(0.026) }, { Q(0.044), Q(0.014), Q(-0.044) }, 2, 0, Q(0.06) },
+    { "Fuji Pro 400H", "PRO400H", "Soft pastel, airy cyan-green tint", MC_OFF, Q(0.920), Q(0.260), Q(0.047), Q(0.958), { Q(-0.016), Q(0.018), Q(0.024) }, { Q(0.022), Q(0.020), Q(-0.014) }, 3, 0, 0 },
+    { "Polaroid", "POLA", "Faded instant film, blue shadows", MC_OFF, Q(0.950), Q(0.240), Q(0.060), Q(0.928), { Q(0.008), Q(0.010), Q(0.022) }, { Q(0.020), Q(0.012), Q(-0.016) }, 4, 1, Q(0.25) },
+    { "Portra 800 v3",    "P800V3",  "Warm chrome, soft highlights, big grain",  MC_OFF,      Q(0.95),  Q(0.16),  Q(0.015), Q(0.965), { Q(0.006),  Q(0.002), Q(0.010) },  { Q(0.024),  Q(0.010), Q(-0.026) }, 6, 2, 0 },
+    { "Last Summer Roll", "SUMMER",  "Warm summer negative, green-tinged shadows", MC_OFF,    Q(1.10),  Q(0.20),  Q(0.030), Q(0.975), { Q(-0.004), Q(0.010), Q(0.004) },  { Q(0.028),  Q(0.014), Q(-0.024) }, 4, 0, 0 },
+    { "Classic Neg DR400","CNEG400", "Rich colour negative, green shadows",      MC_OFF,      Q(1.22),  Q(0.18),  Q(0.020), Q(0.970), { Q(-0.010), Q(0.016), Q(0.004) },  { Q(0.006),  Q(0.008), Q(-0.004) }, 3, 0, 0 },
 };
 
 const int film_stock_count = sizeof(film_stocks)/sizeof(film_stocks[0]);
@@ -59,11 +79,30 @@ static const char *size_names[]  = { "Auto", "Fine", "Medium", "Coarse" };
 //-------------------------------------------------------------------
 // Settings helpers
 
+#ifndef FILM_STRENGTH
+#define FILM_STRENGTH   7373    // Q12 multiplier on contrast and tints of the original stocks (4096 = as designed)
+#endif
+#define FILM_SCALED_UPTO 12     // stocks with index below this (the originals) are scaled; newer ones are used as written
+
+static int sclamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
 static const film_stock_t* current_stock()
 {
+    static film_stock_t scaled;
     int i = conf.film_stock;
     if (i < 0 || i >= film_stock_count) i = 0;
-    return &film_stocks[i];
+    const film_stock_t *s = &film_stocks[i];
+    if (i == 0 || i >= FILM_SCALED_UPTO) return s;
+
+    int k = FILM_STRENGTH, c;
+    scaled = *s;
+    scaled.contrast = sclamp((s->contrast * k) >> 12, 0, Q(0.40));
+    for (c = 0; c < 3; c++)
+    {
+        scaled.shadow[c]    = sclamp((s->shadow[c] * k) >> 12, Q(-0.08), Q(0.08));
+        scaled.highlight[c] = sclamp((s->highlight[c] * k) >> 12, Q(-0.08), Q(0.08));
+    }
+    return &scaled;
 }
 
 static int grain_amount()
@@ -256,6 +295,36 @@ static inline void pack8(unsigned char *b, const int *p)
 
 #endif
 
+// Raw buffer access (12 bit packed: 4 pixels per 6 bytes, same layout as core/raw.c; two groups = 8 pixels per 12 bytes)
+#if CAM_SENSOR_BITS_PER_PIXEL == 12
+static inline void unpack8(const unsigned char *b, int *p) {
+    p[0] = (b[1] << 4) | (b[0] >> 4);
+    p[1] = ((b[0] & 0x0F) << 8) | b[3];
+    p[2] = (b[2] << 4) | (b[5] >> 4);
+    p[3] = ((b[5] & 0x0F) << 8) | b[4];
+    p[4] = (b[7] << 4) | (b[6] >> 4);
+    p[5] = ((b[6] & 0x0F) << 8) | b[9];
+    p[6] = (b[8] << 4) | (b[11] >> 4);
+    p[7] = ((b[11] & 0x0F) << 8) | b[10];
+}
+static inline void pack8(unsigned char *b, const int *p) {
+    b[1] = p[0] >> 4;
+    b[0] = (p[0] << 4) | (p[1] >> 8);
+    b[3] = p[1];
+    b[2] = p[2] >> 4;
+    b[5] = (p[2] << 4) | (p[3] >> 8);
+    b[4] = p[3];
+    b[7] = p[4] >> 4;
+    b[6] = (p[4] << 4) | (p[5] >> 8);
+    b[9] = p[5];
+    b[8] = p[6] >> 4;
+    b[11] = (p[6] << 4) | (p[7] >> 8);
+    b[10] = p[7];
+}
+#define GROUP_PIX 8
+#define GROUP_BYTES 12
+#endif
+
 //-------------------------------------------------------------------
 // Developing light: the LCD is dark while the camera captures, so the blue
 // Print LED blinks instead, speeding up as the shot nears done.
@@ -265,6 +334,12 @@ static inline void pack8(unsigned char *b, const int *p)
 #define DEV_LED_ON      0x46
 #endif
 
+#if defined(CAMERA_sx240hs)
+static void dev_led_set(int on) { camera_set_led(0, on, 0); }    // power LED
+#else
+static void dev_led_set(int on) { debug_led(on); }
+#endif
+
 static int dev_led_was_on, dev_led_state;
 static long dev_led_next;
 
@@ -272,11 +347,15 @@ static void dev_light_begin()
 {
 #ifdef DEV_LED_REG
     dev_led_was_on = (*(volatile long*)DEV_LED_REG == DEV_LED_ON);
+#elif defined(CAMERA_sx240hs)
+    dev_led_was_on = 1;        // power LED is normally lit
+#elif defined(CAMERA_sx240hs)
+    dev_led_was_on = 1;        // power LED is normally lit
 #else
     dev_led_was_on = 0;
 #endif
     dev_led_state = 1;
-    debug_led(1);
+    dev_led_set(1);
     dev_led_next = get_tick_count() + 250;
 }
 
@@ -287,26 +366,48 @@ static void dev_light_progress(int done, int total)
     if (now >= dev_led_next)
     {
         dev_led_state = !dev_led_state;
-        debug_led(dev_led_state);
+        dev_led_set(dev_led_state);
         dev_led_next = now + 250 - 200 * done / total;
     }
 }
 
 static void dev_light_end()
 {
-    debug_led(dev_led_was_on);
+    dev_led_set(dev_led_was_on);
 }
 
 //-------------------------------------------------------------------
 
+static unsigned film_dbg_ms, film_dbg_wb_ms, film_dbg_raw;
+
+// One line per shot in CHDK/FILM.LOG: which film the picture was taken with
+static void film_log_shot(void)
+{
+#ifndef FILM_HOST_PREVIEW
+    static char line[64];           // static: raw hook runs on a small task stack
+    int n = sprintf(line, "IMG_%04d  %s\n", (int)get_target_file_num(), current_stock()->name);
+    int fd = open("A/CHDK/FILM.LOG", O_WRONLY|O_CREAT, 0777);
+    if (fd >= 0)
+    {
+        lseek(fd, 0, SEEK_END);
+        write(fd, line, n);
+        close(fd);
+    }
+#endif
+}
+
 void film_apply(void)
 {
-#if CAM_SENSOR_BITS_PER_PIXEL == 10
+    film_cc_suspend();
+    film_log_shot();
+#if CAM_SENSOR_BITS_PER_PIXEL == 10 || CAM_SENSOR_BITS_PER_PIXEL == 12
     const film_stock_t *s = current_stock();
     if (conf.film_stock == 0)
         return;
 
     unsigned char *raw = (unsigned char*)get_raw_image_addr();
+    film_dbg_raw = (unsigned)raw;
+    unsigned t_start = get_tick_count();
     int black = camera_sensor.black_level;
     int white = camera_sensor.white_level;
     int range = white - black;
@@ -365,6 +466,7 @@ void film_apply(void)
     }
     int igR = (ONE << 12) / gR;
     int igB = (ONE << 12) / gB;
+    film_dbg_wb_ms = get_tick_count() - t_start;
 
     // Grain setup
     int amount = grain_amount();
@@ -431,6 +533,11 @@ void film_apply(void)
         {
             unpack8(ra, a);
             unpack8(rb, b);
+#if FILM_PROFILE == 1
+            pack8(ra, a);
+            pack8(rb, b);
+            continue;
+#endif
 
             for (k = 0; k < 8; k += 2, qx++)
             {
@@ -505,6 +612,7 @@ void film_apply(void)
 
     if (show_dev)
         dev_light_end();
+    film_dbg_ms = get_tick_count() - t_start;
 #endif
 }
 
@@ -512,18 +620,111 @@ void film_apply(void)
 // Camera colour mode follows the stock (only when changed, so manual
 // Canon menu changes are respected afterwards)
 
+#ifndef FILM_PREVIEW_COLORS
+#define FILM_PREVIEW_COLORS 0   // stocks without a Canon colour mode use Custom Color so the live view approximates the look
+#endif
+#define MC_CUSTOM 11
+
+#ifdef FILM_HOST_PREVIEW
+#define cc_now() 0u
+#else
+#define cc_now() ((unsigned int)get_tick_count())
+#endif
+
 static int applied_stock = -1;
+static int cc_calls = 0;
+static int cc_active = 0;           // Custom Color preview currently set on the camera
+static unsigned int cc_resume = 0;  // tick at which the preview is put back after a shot
+
+static int step_from(int v, int unit)   // nearest step, limited to -2..+2
+{
+    int st = (v >= 0) ? (v + unit / 2) / unit : -((-v + unit / 2) / unit);
+    return sclamp(st, -2, 2);
+}
+
+#if FILM_PREVIEW_COLORS && defined(PROPCASE_CUSTOM_RED) && defined(PROPCASE_CUSTOM_CONTRAST)
+static void apply_custom_color(const film_stock_t *s)
+{
+    int c = s->contrast, sat = s->saturation;
+    int cstep = c < Q(0.08) ? -1 : (c < Q(0.15) ? 0 : (c < Q(0.25) ? 1 : 2));
+    int sstep = sat < Q(0.88) ? -2 : (sat < Q(0.97) ? -1 : (sat < Q(1.08) ? 0 : (sat < Q(1.20) ? 1 : 2)));
+    int t[3], k, avg = 0;
+    for (k = 0; k < 3; k++) { t[k] = (s->highlight[k] * 6 + s->shadow[k] * 4) / 10; avg += t[k]; }
+    avg /= 3;
+    // Canon sliders: 254 = -2, 255 = -1, 0, 1, 2
+    shooting_set_prop(PROPCASE_CUSTOM_CONTRAST,   cstep & 0xFF);
+    shooting_set_prop(PROPCASE_CUSTOM_SATURATION, sstep & 0xFF);
+    shooting_set_prop(PROPCASE_CUSTOM_RED,   step_from(t[0] - avg, Q(0.012)) & 0xFF);
+    shooting_set_prop(PROPCASE_CUSTOM_GREEN, step_from(t[1] - avg, Q(0.012)) & 0xFF);
+    shooting_set_prop(PROPCASE_CUSTOM_BLUE,  step_from(t[2] - avg, Q(0.012)) & 0xFF);
+    // toggle the mode so the camera refreshes the live view even if it was already in Custom Color
+    shooting_set_prop(PROPCASE_MY_COLORS, MC_OFF);
+#ifndef FILM_HOST_PREVIEW
+    msleep(100);
+#endif
+    shooting_set_prop(PROPCASE_MY_COLORS, MC_CUSTOM);
+    cc_active = 1;
+}
+
+static void cc_reset(void)
+{
+    shooting_set_prop(PROPCASE_CUSTOM_CONTRAST, 0);
+    shooting_set_prop(PROPCASE_CUSTOM_SATURATION, 0);
+    shooting_set_prop(PROPCASE_CUSTOM_RED, 0);
+    shooting_set_prop(PROPCASE_CUSTOM_GREEN, 0);
+    shooting_set_prop(PROPCASE_CUSTOM_BLUE, 0);
+    shooting_set_prop(PROPCASE_MY_COLORS, MC_OFF);
+    cc_active = 0;
+}
+#endif
 
 static void apply_camera_colors()
 {
+    cc_calls++;
     if (!conf.film_camera_color || !camera_info.state.mode_rec)
         return;
+    if (cc_resume && (int)(cc_now() - cc_resume) >= 0) { cc_resume = 0; applied_stock = -1; }
+    if (cc_resume)
+        return;                     // wait until the shot has been developed
     if (applied_stock == conf.film_stock)
         return;
-    int mc = current_stock()->my_colors;
+#if FILM_PREVIEW_COLORS && defined(PROPCASE_CUSTOM_RED) && defined(PROPCASE_CUSTOM_CONTRAST)
+    if (conf.film_stock == 0 && shooting_get_prop(PROPCASE_MY_COLORS) == MC_CUSTOM)
+    {
+        cc_reset();
+        applied_stock = 0;
+        return;
+    }
+#endif
+    const film_stock_t *s = current_stock();
+    int mc = s->my_colors;
+#if FILM_PREVIEW_COLORS && defined(PROPCASE_CUSTOM_RED) && defined(PROPCASE_CUSTOM_CONTRAST)
+    if (mc == MC_OFF && conf.film_stock > 0)
+    {
+        apply_custom_color(s);
+        applied_stock = conf.film_stock;
+        return;
+    }
+#endif
+    cc_active = 0;
     if (mc >= 0)
         shooting_set_prop(PROPCASE_MY_COLORS, mc);
     applied_stock = conf.film_stock;
+}
+
+// Called from the raw hook: put the camera back to plain colour so Canon does not add
+// its own contrast/saturation on top of the film look, then restore the preview later.
+static void film_cc_suspend(void)
+{
+#if FILM_PREVIEW_COLORS
+    if (cc_active)
+    {
+        shooting_set_prop(PROPCASE_MY_COLORS, MC_OFF);
+        cc_active = 0;
+        cc_resume = cc_now() + 3000;
+        if (!cc_resume) cc_resume = 1;
+    }
+#endif
 }
 
 void film_settings_changed(void)
@@ -548,14 +749,188 @@ static int pill_text(int x, int y, const char *t, color fg)
     return x + strlen(t) * FONT_WIDTH;
 }
 
+#define FILM_LIVE_PREVIEW 0     // software live view preview is too slow on the SX240 (about 4 fps), kept disabled
+
+#ifndef FILM_HOST_PREVIEW
+//-------------------------------------------------------------------
+// Approximate live view preview: contrast curve on luma, tints and saturation on chroma.
+// Works on the UYVY viewport buffer (U Y1 V Y2 per pair of pixels).
+
+static unsigned char lv_y[256], lv_u[256], lv_v[256];   // luma curve, chroma tint (+128 bias)
+static int lv_stock = -1;
+static unsigned char *lv_last_buf = 0;
+static unsigned int lv_last_hash = 0;
+
+static void lv_build(void)
+{
+    const film_stock_t *s = current_stock();
+    int y;
+    for (y = 0; y < 256; y++)
+    {
+        int p = (y << 12) / 255;
+        int t = (p * (ONE - p)) >> 12;
+        int f = ((p - PIVOT) * t) >> 10;
+        int v = p + ((s->contrast * f) >> 12);
+        v = sclamp(v, 0, ONE);
+        v = s->lift + ((v * (s->white - s->lift)) >> 12);
+        v = sclamp(v, 0, ONE);
+
+        int inv = ONE - v;
+        int sh = (inv * inv) >> 12;
+        int hi = (v * v) >> 12;
+        int dr = ((s->shadow[0] * sh) >> 12) + ((s->highlight[0] * hi) >> 12);
+        int dg = ((s->shadow[1] * sh) >> 12) + ((s->highlight[1] * hi) >> 12);
+        int db = ((s->shadow[2] * sh) >> 12) + ((s->highlight[2] * hi) >> 12);
+        int du = ((-43 * dr - 85 * dg + 128 * db) * 255) >> 20;
+        int dv = ((128 * dr - 107 * dg - 21 * db) * 255) >> 20;
+
+        lv_y[y] = (v * 255) >> 12;
+        lv_u[y] = sclamp(du, -127, 127) + 128;
+        lv_v[y] = sclamp(dv, -127, 127) + 128;
+    }
+    lv_stock = conf.film_stock;
+}
+
+static unsigned int lv_hash(unsigned char *buf, int n6, int rows, int stride)
+{
+    unsigned int h = 0;
+    int r, g;
+    for (r = rows / 16; r < rows; r += rows / 8)
+        for (g = n6 / 8; g < n6; g += n6 / 4)
+            h = h * 31 + buf[r * stride + g * 6 + 1];
+    return h;
+}
+
+static int lv_calls, lv_done, lv_why;
+static int lv_g, lv_r, lv_st;
+static unsigned int lv_buf;
+
+extern char active_viewport_buffer;
+extern void* viewport_buffers[];
+
+static unsigned int lv_hashes[4];
+static unsigned char lv_valid[4];
+static int lv_ms, lv_fps;
+static unsigned int lv_t0, lv_d0;
+
+static void lv_process(unsigned char *buf, int n6, int rows, int stride, int sat)
+{
+    int r, g;
+    for (r = 0; r < rows; r++)
+    {
+        unsigned char *b = buf + r * stride;
+        for (g = 0; g < n6; g++, b += 6)
+        {
+            int y1 = b[1], y2 = b[2], y3 = b[4], y4 = b[5];
+            int ya = (y1 + y2 + y3 + y4) >> 2;
+            int u = (((signed char)b[0] * sat) >> 12) + (lv_u[ya] - 128);
+            int v = (((signed char)b[3] * sat) >> 12) + (lv_v[ya] - 128);
+            b[0] = (unsigned char)sclamp(u, -128, 127);
+            b[3] = (unsigned char)sclamp(v, -128, 127);
+            b[1] = lv_y[y1];
+            b[2] = lv_y[y2];
+            b[4] = lv_y[y3];
+            b[5] = lv_y[y4];
+        }
+    }
+}
+
+static void film_live_apply(void)
+{
+    lv_calls++;
+    if (conf.film_stock <= 0 || conf.film_stock >= film_stock_count) { lv_why = 1; return; }
+    if ((mode_get() & MODE_MASK) != MODE_REC) { lv_why = 2; return; }
+    if (MODE_IS_VIDEO(mode_get()) || is_video_recording()) { lv_why = 3; return; }
+
+    // viewport is YUV 4:1:1: 6 bytes per 4 pixels, order U Y1 Y2 V Y3 Y4 (U,V signed)
+    int groups = vid_get_viewport_width();
+    int rows   = vid_get_viewport_height() * vid_get_viewport_yscale();
+    int stride = vid_get_viewport_byte_width();
+    int n6 = groups / 2;
+    if (n6 <= 0 || rows <= 0 || stride < n6 * 6) { lv_why = 5; return; }
+
+    int i, did = 0;
+    unsigned int t0 = get_tick_count();
+
+    if (lv_stock != conf.film_stock)
+    {
+        lv_build();
+        for (i = 0; i < 4; i++) lv_valid[i] = 0;
+    }
+
+    int sat = current_stock()->saturation;
+    for (i = 0; i < 4; i++)
+    {
+        unsigned char *vb = (unsigned char*)viewport_buffers[i];
+        if (!vb) continue;
+        if (lv_valid[i] && lv_hash(vb, n6, rows, stride) == lv_hashes[i]) continue;   // not redrawn by Canon yet
+        lv_process(vb, n6, rows, stride, sat);
+        lv_hashes[i] = lv_hash(vb, n6, rows, stride);
+        lv_valid[i] = 1;
+        did++;
+    }
+    lv_done += did;
+    lv_why = 0;
+    if (did) lv_ms = get_tick_count() - t0;
+    if (get_tick_count() - lv_t0 >= 1000)
+    {
+        lv_fps = (lv_done - lv_d0) * 1000 / (get_tick_count() - lv_t0);
+        lv_t0 = get_tick_count();
+        lv_d0 = lv_done;
+    }
+}
+#else
+static void film_live_apply(void) {}
+#endif
+
+static int canon_menu_open(void);
+static int pill_valid;
+
 void film_draw_osd(int is_osd_edit)
 {
+    #if 0
+    {
+        char fdbg[64];
+        sprintf(fdbg, "F tot%u wb%u raw%08x", film_dbg_ms, film_dbg_wb_ms, film_dbg_raw);
+        draw_string(8, 56, fdbg, MAKE_COLOR(COLOR_BLACK, COLOR_WHITE));
+    }
+#endif
+#if 0
+    {
+        char dbg[96];
+        sprintf(dbg, "MC%d C%d S%d R%d G%d B%d ap%d n%d",
+            (int)shooting_get_prop(PROPCASE_MY_COLORS),
+            (int)(signed char)shooting_get_prop(PROPCASE_CUSTOM_CONTRAST),
+            (int)(signed char)shooting_get_prop(PROPCASE_CUSTOM_SATURATION),
+            (int)(signed char)shooting_get_prop(PROPCASE_CUSTOM_RED),
+            (int)(signed char)shooting_get_prop(PROPCASE_CUSTOM_GREEN),
+            (int)(signed char)shooting_get_prop(PROPCASE_CUSTOM_BLUE),
+            applied_stock, cc_calls);
+        draw_string(8, 40, dbg, MAKE_COLOR(COLOR_BLACK, COLOR_WHITE));
+    }
+#endif
+#if FILM_LIVE_PREVIEW
+    film_live_apply();
+#ifndef FILM_HOST_PREVIEW
+    {
+        char dbg[72];
+        sprintf(dbg, "LV fps%d ms%d w%d a%d", lv_fps, lv_ms, lv_why, (int)active_viewport_buffer);
+        draw_string(8, 40, dbg, MAKE_COLOR(COLOR_BLACK, COLOR_WHITE));
+    }
+#endif
+#endif
     apply_camera_colors();
 
-    if (!conf.film_osd)
+    if (!conf.film_osd || canon_menu_open())
+    {
+        pill_valid = 0;
         return;
+    }
     if (!is_osd_edit && (!camera_info.state.mode_rec || camera_info.state.mode_video || camera_info.state.is_shutter_half_press))
+    {
+        pill_valid = 0;
         return;
+    }
 
     static char grain[8], batt[8], space[8];
     const char *tag = conf.film_stock ? current_stock()->tag : "NO FILM";
@@ -576,8 +951,20 @@ void film_draw_osd(int is_osd_edit)
     int x = camera_screen.disp_left + (camera_screen.disp_width - w) / 2;
     int y = 4;
 
-    draw_rectangle(x, y, x + w, y + h + 3, MAKE_COLOR(COLOR_BLACK, COLOR_GREY_DK), RECT_BORDER1|DRAW_FILLED|RECT_ROUND_CORNERS);
-    draw_rectangle(x + 5, y + h/2 - 1, x + 8, y + h/2 + 2, MAKE_COLOR(COLOR_RED, COLOR_RED), RECT_BORDER0|DRAW_FILLED);
+    // Repainting the pill background every cycle makes the bar flicker. Repaint it only when
+    // something changed (or now and then in case Canon drew over it); text alone repaints in place.
+    static char last_key[48];
+    static int redraw_ticks;
+    char key[48];
+    sprintf(key, "%s|%s|%s|%s|%s|%d", tag, grain, raw, batt, space, is_osd_edit);
+    int full = !pill_valid || strcmp(key, last_key) || !((++redraw_ticks) & 63);
+    if (full)
+    {
+        draw_rectangle(x, y, x + w, y + h + 3, MAKE_COLOR(COLOR_BLACK, COLOR_GREY_DK), RECT_BORDER1|DRAW_FILLED|RECT_ROUND_CORNERS);
+        draw_rectangle(x + 5, y + h/2 - 1, x + 8, y + h/2 + 2, MAKE_COLOR(COLOR_RED, COLOR_RED), RECT_BORDER0|DRAW_FILLED);
+        strcpy(last_key, key);
+        pill_valid = 1;
+    }
     int tx = pill_text(x + 13, y + 2, tag, conf.film_stock ? COLOR_WHITE : COLOR_GREY);
     tx = pill_text(tx, y + 2, grain, COLOR_GREY_LT);
     tx = pill_text(tx, y + 2, raw, COLOR_GREY_LT);
@@ -600,9 +987,26 @@ void film_draw_osd(int is_osd_edit)
 #define PK_H        140
 #define PK_PAD      12
 
+// True while a Canon menu (MENU or FUNC.SET) is on screen: CHDK must leave the screen to Canon then
+#ifdef FILM_HOST_PREVIEW
+static int canon_menu_open(void) { return 0; }
+#else
+static int canon_menu_open(void)
+{
+    return (canon_menu_active != (int)&canon_menu_active - 4) || canon_shoot_menu_active != 0;
+}
+#endif
+
 int film_picker_active(void)
 {
-    return camera_info.state.mode_rec && !camera_info.state.mode_video && !camera_info.state.state_kbd_script_run;
+    int open = canon_menu_open();
+#ifndef FILM_HOST_PREVIEW
+    static int was_open = 0;
+    if (open && !was_open)
+        gui_set_need_restore();     // erase what CHDK drew; Canon's menu takes the screen
+    was_open = open;
+#endif
+    return camera_info.state.mode_rec && !camera_info.state.mode_video && !camera_info.state.state_kbd_script_run && !open;
 }
 
 static int raw_key_free()
@@ -636,6 +1040,7 @@ void film_picker_draw(int force_redraw)
     draw_string(ix, y+6, "FILM", label);
     sprintf(buf, "%d / %d", conf.film_stock, film_stock_count-1);
     draw_string_justified(ix, y+6, conf.film_stock ? buf : "OFF", label, 0, iw, TEXT_RIGHT);
+    draw_string_justified(ix, y+6, "PortHack by Bastian", accent, 0, iw, TEXT_CENTER);
 
     // stock name, double size, with arrows
     int nl = strlen(s->name);

@@ -12,6 +12,6 @@ cp "$here"/*.h "$here"/*.c "$out/src/"
 cp "$root/core/film.c" "$root/core/film.h" "$root/lib/font/font_8x16_uni.h" "$out/src/"
 sed -i '' 's|"../../core/film.h"|"film.h"|' "$out/src/preview.c"
 cd "$out/src"
-cc -O2 -Wall -Wextra -DFILM_HOST_PREVIEW -I. -o "$out/preview" preview.c film.c host_draw.c
-cc -O2 -Wall -Wextra -DFILM_HOST_PREVIEW -I. -o "$out/ui_preview" ui_preview.c film.c host_draw.c
+cc -O2 -Wall -Wextra $EXTRA_CFLAGS -DFILM_HOST_PREVIEW -I. -o "$out/preview" preview.c film.c host_draw.c
+cc -O2 -Wall -Wextra $EXTRA_CFLAGS -DFILM_HOST_PREVIEW -I. -o "$out/ui_preview" ui_preview.c film.c host_draw.c
 echo "$out"

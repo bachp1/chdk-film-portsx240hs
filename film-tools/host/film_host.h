@@ -7,7 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef CAM_SENSOR_BITS_PER_PIXEL
 #define CAM_SENSOR_BITS_PER_PIXEL   10
+#endif
 #define PROPCASE_MY_COLORS          184
 
 typedef struct

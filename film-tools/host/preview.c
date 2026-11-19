@@ -35,6 +35,17 @@ void gui_enum_value_change(int *value, int change, int num_items)
 }
 
 // A570 geometry (platform/a570/platform_camera.h)
+#if CAM_SENSOR_BITS_PER_PIXEL == 12
+// SX240 HS geometry (platform/sx240hs/platform_camera.h); levels are the CHDK defaults for 12 bit
+#define ROWPIX  4176
+#define ROWS    3060
+#define AX1 96
+#define AY1 24
+#define AX2 4176
+#define AY2 3060
+#define BLACK   127
+#define WHITE   4095
+#else
 #define ROWPIX  3152
 #define ROWS    2340
 #define AX1 38
@@ -43,6 +54,7 @@ void gui_enum_value_change(int *value, int change, int num_items)
 #define AY2 2338
 #define BLACK   32
 #define WHITE   1023
+#endif
 // Rough sensor white balance: what the camera would multiply R and B by in daylight
 #define WB_R    1.9
 #define WB_B    1.5
@@ -99,6 +111,31 @@ static void write_bmp(const char *fn, const unsigned char *rgb, int w, int h)
     free(row); fclose(f);
 }
 
+#if CAM_SENSOR_BITS_PER_PIXEL == 12
+// 12 bit packed, 4 pixels per 6 bytes (same layout as core/raw.c)
+static void set_px(int x, int y, int v)
+{
+    unsigned char *a = rawbuf + y*camera_sensor.raw_rowlen + (x/4)*6;
+    switch (x%4) {
+        case 0: a[0] = (a[0]&0x0F) | (unsigned char)(v << 4); a[1] = (unsigned char)(v >> 4); break;
+        case 1: a[0] = (a[0]&0xF0) | (unsigned char)(v >> 8); a[3] = (unsigned char)v;        break;
+        case 2: a[2] = (unsigned char)(v >> 4); a[5] = (a[5]&0x0F) | (unsigned char)(v << 4); break;
+        case 3: a[4] = (unsigned char)v;        a[5] = (a[5]&0xF0) | (unsigned char)(v >> 8); break;
+    }
+}
+
+static int get_px(int x, int y)
+{
+    unsigned char *a = rawbuf + y*camera_sensor.raw_rowlen + (x/4)*6;
+    switch (x%4) {
+        case 0: return (a[1] << 4) | (a[0] >> 4);
+        case 1: return ((a[0] & 0x0F) << 8) | a[3];
+        case 2: return (a[2] << 4) | (a[5] >> 4);
+        case 3: return ((a[5] & 0x0F) << 8) | a[4];
+    }
+    return 0;
+}
+#else
 static void set_px(int x, int y, int v)
 {
     unsigned char *a = rawbuf + y*camera_sensor.raw_rowlen + (x/8)*10;
@@ -129,6 +166,7 @@ static int get_px(int x, int y)
     }
     return 0;
 }
+#endif
 
 static double lin(int v) { return pow(v / 255.0, 2.2); }
 
@@ -185,12 +223,12 @@ int main(int argc, char **argv)
     if (argc < 3) { fprintf(stderr, "usage: preview in.bmp outdir [grain]\n"); return 1; }
     if (!read_bmp(argv[1])) { fprintf(stderr, "cannot read %s\n", argv[1]); return 1; }
 
-    camera_sensor.bits_per_pixel = 10;
+    camera_sensor.bits_per_pixel = CAM_SENSOR_BITS_PER_PIXEL;
     camera_sensor.black_level = BLACK;
     camera_sensor.white_level = WHITE;
     camera_sensor.raw_rowpix = ROWPIX;
     camera_sensor.raw_rows = ROWS;
-    camera_sensor.raw_rowlen = ROWPIX * 10 / 8;
+    camera_sensor.raw_rowlen = ROWPIX * CAM_SENSOR_BITS_PER_PIXEL / 8;
     camera_sensor.raw_size = camera_sensor.raw_rowlen * ROWS;
     camera_sensor.active_area.x1 = AX1; camera_sensor.active_area.y1 = AY1;
     camera_sensor.active_area.x2 = AX2; camera_sensor.active_area.y2 = AY2;

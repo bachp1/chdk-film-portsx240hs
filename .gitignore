@@ -35,3 +35,8 @@ tools/makeexport
 tools/makelang
 tools/packfi2/fi2enc
 tools/pakwif
+core/*.bak*
+core/*.bak_*
+bin/
+*.BIN
+*.orig
