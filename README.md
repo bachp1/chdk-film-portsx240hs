@@ -1,4 +1,4 @@
-# chdk-film
+# chdk-film Port for Sx240hs with more Films
 
 A film simulator for the Canon PowerShot A570 IS, built on [CHDK](https://chdk.fandom.com/wiki/CHDK).
 
