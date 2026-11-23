@@ -1,6 +1,6 @@
 # chdk-film for Sx240hs with more Films
 
-Soon for the sx600hs..
+Soon for the sx600hs maybe?..
 
 A film simulator for the Canon PowerShot A570 IS, built on [CHDK](https://chdk.fandom.com/wiki/CHDK), now ported to sx240hs.
 
@@ -47,6 +47,7 @@ All the films have been fine-tuned and slightly modified.
 | Last Summer Roll | Warm summer negative, green-tinged shadows |
 | Classic Neg DR400 | Rich colour negative, green shadows |
 
+Last 6 films by bacho
 ## On the camera
 
 ### Film picker
